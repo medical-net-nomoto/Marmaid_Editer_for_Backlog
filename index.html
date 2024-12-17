@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Mermaid SVG API Post</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .help-text {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .usage {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="form-group">
+            <label for="url">URL:</label>
+            <input id="url" type="text" placeholder="https://xxxxx.backlog.jp" />
+            <div class="help-text">backlogにアクセスするURL</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="token">APIキー:</label>
+            <input id="token" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+            <div class="help-text">個人設定のAPIから取得したAPIキー</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="wikiid">Wiki ID:</label>
+            <input id="wikiid" type="text" placeholder="9999999999" />
+            <div class="help-text">backlogのwikiページ開いたときの数字</div>
+        </div>
+
+        <div class="usage">
+            <h3>使い方</h3>
+            <p>backlogwikiページに以下のように記述して保存してください：</p>
+            <pre>```Mermaid
+flowchart LR
+A[Hard edge] -->|Link text| B(Round edge)
+B --> C{Decision}
+C -->|One| D[Result one]
+C -->|Two| E[Result two]
+```</pre>
+            <p>フォームに値を入れて、ボタンを押してください。<br>
+            ※ ```Mermaidを検索して、SVGを生成しています。表記が違うと、動きません。</p>
+        </div>
+
+        <button id="Mermaid">Mermaid SVG 添付</button>
+        <div id="mermaid-container"></div>
+    </div>
+
+    <script type="module">
+        import { BacklogApiClient } from './src/services/backlogApi.ts';
+        import { MermaidService } from './src/services/mermaidService.ts';
+        import { formatDateForFileName } from './src/utils/dateUtils.ts';
+
+        const mermaidService = new MermaidService();
+
+        async function sendMermaid() {
+            try {
+                const config = {
+                    baseUrl: document.getElementById('url').value,
+                    apiKey: document.getElementById('token').value,
+                    wikiId: document.getElementById('wikiid').value
+                };
+
+                const backlogClient = new BacklogApiClient(config);
+                const wiki = await backlogClient.getWiki();
+                
+                const lines = wiki.content.split(/\r?\n/);
+                let inMermaid = false;
+                let counter = 1;
+                let mermaidContent = [];
+                let updatedContent = [];
+                let currentFileName = '';
+                
+                for (const line of lines) {
+                    updatedContent.push(line);
+                    
+                    if (inMermaid) {
+                        if (line === '```') {
+                            inMermaid = false;
+                            const svg = await mermaidService.renderDiagram(mermaidContent.join('\n'));
+                            const attachmentId = await backlogClient.attachFile(svg, currentFileName);
+                            const imageLink = `![image](/downloadWikiAttachment/${attachmentId}/${currentFileName})`;
+                            
+                            if (/Mermaid[0-9]+-[0-9]+[.]svg/.test(lines[lines.indexOf(line) + 1])) {
+                                lines[lines.indexOf(line) + 1] = imageLink;
+                            } else {
+                                updatedContent.push(imageLink);
+                            }
+                            counter++;
+                        } else {
+                            mermaidContent.push(line);
+                        }
+                    } else if (line === '```Mermaid') {
+                        currentFileName = `Mermaid${counter}-${formatDateForFileName()}.svg`;
+                        mermaidContent = [];
+                        inMermaid = true;
+                    }
+                }
+
+                if (counter > 1) {
+                    await backlogClient.updateWiki(wiki.name, updatedContent.join('\r\n'));
+                }
+            } catch (error) {
+                console.error('エラーが発生しました:', error);
+                alert(`エラーが発生しました: ${error.message}`);
+            }
+        }
+
+        document.getElementById('Mermaid').addEventListener('click', sendMermaid);
+    </script>
+</body>
+</html>
